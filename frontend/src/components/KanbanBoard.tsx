@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  KeyboardSensor,
   useSensor,
   useSensors,
   closestCorners,
@@ -13,83 +14,81 @@ import {
 } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
-import { createId, initialData, moveCard, type BoardData } from "@/lib/kanban";
+import { moveCard, type BoardData } from "@/lib/kanban";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { ApiError, request } from "@/lib/api";
 
-export const KanbanBoard = () => {
-  const [board, setBoard] = useState<BoardData>(() => initialData);
+export const KanbanBoard = ({ onUnauthorized }: { onUnauthorized?: () => void }) => {
+  const [board, setBoard] = useState<BoardData | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const inFlight = useRef(false);
+
+  const load = useCallback(async () => {
+    setError("");
+    try { setBoard(await request<BoardData>("board")); }
+    catch (failure) {
+      if (failure instanceof ApiError && failure.status === 401) onUnauthorized?.();
+      setError("Unable to load the board. Please try again.");
+    }
+  }, [onUnauthorized]);
+
+  useEffect(() => {
+    let active = true;
+    request<BoardData>("board").then((saved) => { if (active) setBoard(saved); }).catch((failure) => {
+      if (!active) return;
+      if (failure instanceof ApiError && failure.status === 401) onUnauthorized?.();
+      setError("Unable to load the board. Please try again.");
+    });
+    return () => { active = false; };
+  }, [onUnauthorized]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 6 },
-    })
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const cardsById = useMemo(() => board.cards, [board.cards]);
+  async function mutate(path: string, method: string, body?: unknown): Promise<boolean> {
+    if (inFlight.current) return false;
+    inFlight.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      setBoard(await request<BoardData>(path, method, body));
+      return true;
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 401) onUnauthorized?.();
+      setError(failure instanceof ApiError ? failure.message : "Unable to save changes. Please try again.");
+      return false;
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  }
 
   const handleDragStart = (event: DragStartEvent) => {
-    setActiveCardId(event.active.id as string);
+    if (!inFlight.current) setActiveCardId(event.active.id as string);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveCardId(null);
-
-    if (!over || active.id === over.id) {
-      return;
-    }
-
-    setBoard((prev) => ({
-      ...prev,
-      columns: moveCard(prev.columns, active.id as string, over.id as string),
-    }));
-  };
-
-  const handleRenameColumn = (columnId: string, title: string) => {
-    setBoard((prev) => ({
-      ...prev,
-      columns: prev.columns.map((column) =>
-        column.id === columnId ? { ...column, title } : column
-      ),
-    }));
-  };
-
-  const handleAddCard = (columnId: string, title: string, details: string) => {
-    const id = createId("card");
-    setBoard((prev) => ({
-      ...prev,
-      cards: {
-        ...prev.cards,
-        [id]: { id, title, details: details || "No details yet." },
-      },
-      columns: prev.columns.map((column) =>
-        column.id === columnId
-          ? { ...column, cardIds: [...column.cardIds, id] }
-          : column
-      ),
-    }));
-  };
-
-  const handleDeleteCard = (columnId: string, cardId: string) => {
-    setBoard((prev) => {
-      return {
-        ...prev,
-        cards: Object.fromEntries(
-          Object.entries(prev.cards).filter(([id]) => id !== cardId)
-        ),
-        columns: prev.columns.map((column) =>
-          column.id === columnId
-            ? {
-                ...column,
-                cardIds: column.cardIds.filter((id) => id !== cardId),
-              }
-            : column
-        ),
-      };
+    if (!board || inFlight.current || !over || active.id === over.id) return;
+    const columns = moveCard(board.columns, String(active.id), String(over.id));
+    const destination = columns.find((column) => column.cardIds.includes(String(active.id)));
+    if (destination) void mutate(`cards/${active.id}/move`, "POST", {
+      column_id: destination.id, position: destination.cardIds.indexOf(String(active.id)),
     });
   };
 
-  const activeCard = activeCardId ? cardsById[activeCardId] : null;
+  const handleRenameColumn = (columnId: string, title: string) => mutate(`columns/${columnId}`, "PATCH", { title });
+  const handleAddCard = (columnId: string, title: string, details: string) => mutate(`columns/${columnId}/cards`, "POST", { title, details });
+  const handleDeleteCard = (_columnId: string, cardId: string) => mutate(`cards/${cardId}`, "DELETE");
+  const handleEditCard = (cardId: string, title: string, details: string) => mutate(`cards/${cardId}`, "PATCH", { title, details });
+
+  if (!board) return <div className="p-8">{error ? <><p role="alert">{error}</p><button onClick={load}>Retry</button></> : <p role="status">Loading board...</p>}</div>;
+  const activeCard = activeCardId ? board.cards[activeCardId] : null;
 
   return (
     <div className="relative overflow-hidden">
@@ -133,24 +132,29 @@ export const KanbanBoard = () => {
           </div>
         </header>
 
+        {error && <p role="alert" className="text-red-700">{error}</p>}
+        {busy && <p role="status">Saving changes...</p>}
         <DndContext
           sensors={sensors}
           collisionDetection={closestCorners}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
+          onDragCancel={() => setActiveCardId(null)}
         >
-          <section className="grid gap-6 lg:grid-cols-5">
+          <fieldset disabled={busy} aria-label="Kanban board" className="grid min-w-0 gap-6 border-0 p-0 lg:grid-cols-5">
             {board.columns.map((column) => (
               <KanbanColumn
                 key={column.id}
                 column={column}
+                busy={busy}
                 cards={column.cardIds.map((cardId) => board.cards[cardId])}
                 onRename={handleRenameColumn}
                 onAddCard={handleAddCard}
                 onDeleteCard={handleDeleteCard}
+                onEditCard={handleEditCard}
               />
             ))}
-          </section>
+          </fieldset>
           <DragOverlay>
             {activeCard ? (
               <div className="w-[260px]">

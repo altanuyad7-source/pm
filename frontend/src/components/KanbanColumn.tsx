@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type { Card, Column } from "@/lib/kanban";
@@ -8,9 +9,11 @@ import { NewCardForm } from "@/components/NewCardForm";
 type KanbanColumnProps = {
   column: Column;
   cards: Card[];
-  onRename: (columnId: string, title: string) => void;
-  onAddCard: (columnId: string, title: string, details: string) => void;
-  onDeleteCard: (columnId: string, cardId: string) => void;
+  busy: boolean;
+  onRename: (columnId: string, title: string) => Promise<boolean>;
+  onAddCard: (columnId: string, title: string, details: string) => Promise<boolean>;
+  onDeleteCard: (columnId: string, cardId: string) => Promise<boolean>;
+  onEditCard: (cardId: string, title: string, details: string) => Promise<boolean>;
 };
 
 export const KanbanColumn = ({
@@ -19,8 +22,10 @@ export const KanbanColumn = ({
   onRename,
   onAddCard,
   onDeleteCard,
+  onEditCard,
+  busy,
 }: KanbanColumnProps) => {
-  const { setNodeRef, isOver } = useDroppable({ id: column.id });
+  const { setNodeRef, isOver } = useDroppable({ id: column.id, disabled: busy });
 
   return (
     <section
@@ -39,12 +44,7 @@ export const KanbanColumn = ({
               {cards.length} cards
             </span>
           </div>
-          <input
-            value={column.title}
-            onChange={(event) => onRename(column.id, event.target.value)}
-            className="mt-3 w-full bg-transparent font-display text-lg font-semibold text-[var(--navy-dark)] outline-none"
-            aria-label="Column title"
-          />
+          <ColumnTitle key={column.title} title={column.title} onSave={(title) => onRename(column.id, title)} />
         </div>
       </div>
       <div className="mt-4 flex flex-1 flex-col gap-3">
@@ -53,7 +53,9 @@ export const KanbanColumn = ({
             <KanbanCard
               key={card.id}
               card={card}
+              busy={busy}
               onDelete={(cardId) => onDeleteCard(column.id, cardId)}
+              onEdit={onEditCard}
             />
           ))}
         </SortableContext>
@@ -69,3 +71,19 @@ export const KanbanColumn = ({
     </section>
   );
 };
+
+function ColumnTitle({ title, onSave }: { title: string; onSave: (title: string) => Promise<boolean> }) {
+  const [draft, setDraft] = useState(title);
+  async function save() {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === title) { setDraft(title); return; }
+    if (!await onSave(trimmed)) setDraft(title);
+  }
+  return <input value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={save}
+    onKeyDown={(event) => {
+      if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
+      if (event.key === "Escape") setDraft(title);
+    }}
+    className="mt-3 w-full bg-transparent font-display text-lg font-semibold text-[var(--navy-dark)] outline-none focus:ring-2 focus:ring-[var(--primary-blue)]"
+    aria-label="Column title" />;
+}

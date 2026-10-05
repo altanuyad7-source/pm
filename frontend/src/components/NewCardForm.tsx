@@ -3,19 +3,19 @@ import { useState, type FormEvent } from "react";
 const initialFormState = { title: "", details: "" };
 
 type NewCardFormProps = {
-  onAdd: (title: string, details: string) => void;
+  onAdd: (title: string, details: string) => Promise<boolean>;
 };
 
 export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [formState, setFormState] = useState(initialFormState);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!formState.title.trim()) {
       return;
     }
-    onAdd(formState.title.trim(), formState.details.trim());
+    if (!await onAdd(formState.title.trim(), formState.details.trim())) return;
     setFormState(initialFormState);
     setIsOpen(false);
   };
@@ -25,6 +25,8 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
       {isOpen ? (
         <form onSubmit={handleSubmit} className="space-y-3">
           <input
+            aria-label="Card title"
+            autoFocus
             value={formState.title}
             onChange={(event) =>
               setFormState((prev) => ({ ...prev, title: event.target.value }))
@@ -34,6 +36,7 @@ export const NewCardForm = ({ onAdd }: NewCardFormProps) => {
             required
           />
           <textarea
+            aria-label="Details"
             value={formState.details}
             onChange={(event) =>
               setFormState((prev) => ({ ...prev, details: event.target.value }))
