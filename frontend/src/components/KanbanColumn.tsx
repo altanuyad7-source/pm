@@ -12,11 +12,11 @@ type KanbanColumnProps = {
   busy: boolean;
   onRename: (columnId: string, title: string) => Promise<boolean>;
   onAddCard: (columnId: string, title: string, details: string) => Promise<boolean>;
-  onDeleteCard: (columnId: string, cardId: string) => Promise<boolean>;
+  onDeleteCard: (cardId: string) => Promise<boolean>;
   onEditCard: (cardId: string, title: string, details: string) => Promise<boolean>;
 };
 
-export const KanbanColumn = ({
+export function KanbanColumn({
   column,
   cards,
   onRename,
@@ -24,7 +24,7 @@ export const KanbanColumn = ({
   onDeleteCard,
   onEditCard,
   busy,
-}: KanbanColumnProps) => {
+}: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id, disabled: busy });
 
   return (
@@ -54,7 +54,7 @@ export const KanbanColumn = ({
               key={card.id}
               card={card}
               busy={busy}
-              onDelete={(cardId) => onDeleteCard(column.id, cardId)}
+              onDelete={onDeleteCard}
               onEdit={onEditCard}
             />
           ))}
@@ -65,12 +65,10 @@ export const KanbanColumn = ({
           </div>
         )}
       </div>
-      <NewCardForm
-        onAdd={(title, details) => onAddCard(column.id, title, details)}
-      />
+      <NewCardForm onAdd={(title, details) => onAddCard(column.id, title, details)} />
     </section>
   );
-};
+}
 
 function ColumnTitle({ title, onSave }: { title: string; onSave: (title: string) => Promise<boolean> }) {
   const [draft, setDraft] = useState(title);

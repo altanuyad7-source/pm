@@ -2,16 +2,17 @@
 
 import os
 import secrets
-from time import time
-from pathlib import Path
-from urllib.parse import urlsplit
 from contextlib import asynccontextmanager
+from pathlib import Path
+from time import time
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
+
 from database import Database
 
 COOKIE = "kanban_session"
@@ -55,8 +56,6 @@ def create_app(static_dir: Path | None = None, database_path: Path | None = None
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin")
             if origin and urlsplit(origin).netloc != request.headers.get("host"):
-                from fastapi.responses import JSONResponse
-
                 return JSONResponse({"detail": "Origin not allowed"}, status_code=403)
         response = await call_next(request)
         if request.url.path.startswith("/api/"):

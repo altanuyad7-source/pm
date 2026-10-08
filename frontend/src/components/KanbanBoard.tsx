@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -12,34 +12,40 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { KanbanColumn } from "@/components/KanbanColumn";
 import { KanbanCardPreview } from "@/components/KanbanCardPreview";
 import { moveCard, type BoardData } from "@/lib/kanban";
-import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { ApiError, request } from "@/lib/api";
 
-export const KanbanBoard = ({ onUnauthorized }: { onUnauthorized?: () => void }) => {
+const LOAD_ERROR = "Unable to load the board. Please try again.";
+
+function isUnauthorized(failure: unknown): boolean {
+  return failure instanceof ApiError && failure.status === 401;
+}
+
+export function KanbanBoard({ onUnauthorized }: { onUnauthorized?: () => void }) {
   const [board, setBoard] = useState<BoardData | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
 
-  const load = useCallback(async () => {
+  async function load() {
     setError("");
     try { setBoard(await request<BoardData>("board")); }
     catch (failure) {
-      if (failure instanceof ApiError && failure.status === 401) onUnauthorized?.();
-      setError("Unable to load the board. Please try again.");
+      if (isUnauthorized(failure)) onUnauthorized?.();
+      setError(LOAD_ERROR);
     }
-  }, [onUnauthorized]);
+  }
 
   useEffect(() => {
     let active = true;
     request<BoardData>("board").then((saved) => { if (active) setBoard(saved); }).catch((failure) => {
       if (!active) return;
-      if (failure instanceof ApiError && failure.status === 401) onUnauthorized?.();
-      setError("Unable to load the board. Please try again.");
+      if (isUnauthorized(failure)) onUnauthorized?.();
+      setError(LOAD_ERROR);
     });
     return () => { active = false; };
   }, [onUnauthorized]);
@@ -58,7 +64,7 @@ export const KanbanBoard = ({ onUnauthorized }: { onUnauthorized?: () => void })
       setBoard(await request<BoardData>(path, method, body));
       return true;
     } catch (failure) {
-      if (failure instanceof ApiError && failure.status === 401) onUnauthorized?.();
+      if (isUnauthorized(failure)) onUnauthorized?.();
       setError(failure instanceof ApiError ? failure.message : "Unable to save changes. Please try again.");
       return false;
     } finally {
@@ -67,27 +73,35 @@ export const KanbanBoard = ({ onUnauthorized }: { onUnauthorized?: () => void })
     }
   }
 
-  const handleDragStart = (event: DragStartEvent) => {
-    if (!inFlight.current) setActiveCardId(event.active.id as string);
-  };
+  function handleDragStart(event: DragStartEvent) {
+    if (!inFlight.current) setActiveCardId(String(event.active.id));
+  }
 
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
+  function handleDragEnd({ active, over }: DragEndEvent) {
     setActiveCardId(null);
     if (!board || inFlight.current || !over || active.id === over.id) return;
-    const columns = moveCard(board.columns, String(active.id), String(over.id));
-    const destination = columns.find((column) => column.cardIds.includes(String(active.id)));
-    if (destination) void mutate(`cards/${active.id}/move`, "POST", {
-      column_id: destination.id, position: destination.cardIds.indexOf(String(active.id)),
+    const cardId = String(active.id);
+    const columns = moveCard(board.columns, cardId, String(over.id));
+    const destination = columns.find((column) => column.cardIds.includes(cardId));
+    if (destination) void mutate(`cards/${cardId}/move`, "POST", {
+      column_id: destination.id, position: destination.cardIds.indexOf(cardId),
     });
-  };
+  }
 
   const handleRenameColumn = (columnId: string, title: string) => mutate(`columns/${columnId}`, "PATCH", { title });
   const handleAddCard = (columnId: string, title: string, details: string) => mutate(`columns/${columnId}/cards`, "POST", { title, details });
-  const handleDeleteCard = (_columnId: string, cardId: string) => mutate(`cards/${cardId}`, "DELETE");
+  const handleDeleteCard = (cardId: string) => mutate(`cards/${cardId}`, "DELETE");
   const handleEditCard = (cardId: string, title: string, details: string) => mutate(`cards/${cardId}`, "PATCH", { title, details });
 
-  if (!board) return <div className="p-8">{error ? <><p role="alert">{error}</p><button onClick={load}>Retry</button></> : <p role="status">Loading board...</p>}</div>;
+  if (!board) {
+    if (!error) return <div className="p-8"><p role="status">Loading board...</p></div>;
+    return (
+      <div className="p-8">
+        <p role="alert">{error}</p>
+        <button onClick={load}>Retry</button>
+      </div>
+    );
+  }
   const activeCard = activeCardId ? board.cards[activeCardId] : null;
 
   return (
@@ -166,4 +180,4 @@ export const KanbanBoard = ({ onUnauthorized }: { onUnauthorized?: () => void })
       </main>
     </div>
   );
-};
+}

@@ -1,4 +1,14 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+async function dragToColumn(page: Page, card: Locator, column: Locator) {
+  const cardBox = await card.boundingBox();
+  const columnBox = await column.boundingBox();
+  if (!cardBox || !columnBox) throw new Error("Missing drag coordinates");
+  await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(columnBox.x + columnBox.width / 2, columnBox.y + 120, { steps: 12 });
+  await page.mouse.up();
+}
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
@@ -37,23 +47,7 @@ test("moves a card between columns", async ({ page }) => {
   await page.goto("/");
   const card = page.getByTestId("card-card-1");
   const targetColumn = page.getByTestId("column-col-review");
-  const cardBox = await card.boundingBox();
-  const columnBox = await targetColumn.boundingBox();
-  if (!cardBox || !columnBox) {
-    throw new Error("Unable to resolve drag coordinates.");
-  }
-
-  await page.mouse.move(
-    cardBox.x + cardBox.width / 2,
-    cardBox.y + cardBox.height / 2
-  );
-  await page.mouse.down();
-  await page.mouse.move(
-    columnBox.x + columnBox.width / 2,
-    columnBox.y + 120,
-    { steps: 12 }
-  );
-  await page.mouse.up();
+  await dragToColumn(page, card, targetColumn);
   await expect(targetColumn.getByTestId("card-card-1")).toBeVisible();
   await page.reload();
   await expect(targetColumn.getByTestId("card-card-1")).toBeVisible();
@@ -112,13 +106,7 @@ test("failed drag retains the saved location", async ({ page }) => {
   const card = page.getByTestId("card-card-7");
   const source = page.getByTestId("column-col-done");
   const target = page.getByTestId("column-col-review");
-  const cardBox = await card.boundingBox();
-  const columnBox = await target.boundingBox();
-  if (!cardBox || !columnBox) throw new Error("Missing drag coordinates");
-  await page.mouse.move(cardBox.x + cardBox.width / 2, cardBox.y + cardBox.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(columnBox.x + columnBox.width / 2, columnBox.y + 120, { steps: 12 });
-  await page.mouse.up();
+  await dragToColumn(page, card, target);
   await expect(page.getByRole("alert").filter({ hasText: "Unable to save" })).toBeVisible();
   await expect(source.getByTestId("card-card-7")).toBeVisible();
   await expect(target.getByTestId("card-card-7")).toHaveCount(0);
